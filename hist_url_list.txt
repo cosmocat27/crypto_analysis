@@ -1,0 +1,3 @@
+bitcoin https://coinmarketcap.com/currencies/bitcoin/historical-data/?start=20130428&end=20180108
+ethereum https://coinmarketcap.com/currencies/ethereum/historical-data/?start=20130428&end=20180108
+ripple https://coinmarketcap.com/currencies/ripple/historical-data/?start=20130428&end=20180108
