@@ -3,6 +3,8 @@
 Created on Thu Jan 25 21:46:43 2018
 
 @author: cosmo
+
+Simulate trading strategies based on daily price data and compare results
 """
 
 import pandas as pd
@@ -10,10 +12,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn import model_selection, metrics
 from sklearn.linear_model import LogisticRegression
-import csv
 from datetime import date, datetime
 from cryCompare.crycompare import History
 from portfolio import Portfolio
+from strategies import *
 
 
 coins = ['BTC', 'ETH', 'XRP', 'BCH', 'ADA', 'LTC', 'XLM', 'IOT', 'TRX',
@@ -26,11 +28,14 @@ coins = ['BTC', 'ETH', 'XRP', 'BCH', 'ADA', 'LTC', 'XLM', 'IOT', 'TRX', 'DASH',
          'DOGE', 'VERI', 'DRGN', 'KMD', 'HSR', 'ETN', 'RHOC', 'AE', 'ARK', 'LRC', 'BAT']
 """
 
-coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC', 'DASH', 'NEO', 'XMR', 'IOT', 
-         'ETC', 'QTUM', 'OMG', 'ADA', 'ZEC', 'LSK', 'XLM', 'STRAT']
+#coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC', 'DASH', 'NEO', 'XMR', 'IOT', 
+#         'ETC', 'QTUM', 'OMG', 'ADA', 'ZEC', 'LSK', 'XLM', 'STRAT']
 
 not_tradeable = ['XRB', 'XEM', 'STEEM', 'BCN', 'SC', 'MKR', 'REP', 'KCS', 'ARDR',
                  'DOGE', 'VERI', 'DRGN', 'ETN', ' RHOC', 'AE', 'BCC']
+exclude = ['QTUM']
+
+coins = [c for c in coins if c not in exclude]
 
 c_hist_in = pd.read_csv('daily_data_2017_top20.csv', header=[0,1], index_col=0)
 
@@ -44,14 +49,6 @@ end_dt = "2018-01-26"
 start_amt = 10000
 trade_fee = 0
 #trade_fee = 0.0005
-
-
-pct_chg = pd.DataFrame(index = prices.index, columns = prices.columns)
-for c in prices.columns:
-    pct_chg[c] = prices[c] / prices[c].shift(1) - 1
-
-prices = prices.loc[start_dt:end_dt]
-pct_chg = pct_chg.loc[start_dt:end_dt]
 
 """
 # check price performance over time period    
@@ -70,115 +67,19 @@ print(price_indexed.iloc[-1].sort_values(ascending=False))
 
 # strategy 1: invest start_amt/num_coins in each coin and hodl
 
-p = Portfolio(start_amt, coins, 0)
-amt_each = start_amt / len(coins)
-
-for c in coins:
-    if prices.iloc[0][c] > 0:
-        p.buy(c, amt_each, 0)
-p.snapshot(0)
-
-for i in range(1, len(prices.index)):
-    for c in coins:
-        if prices.iloc[i-1][c] > 0:
-            p.update_price(c, pct_chg.iloc[i][c])
-        elif prices.iloc[i][c] > 0:
-            p.buy(c, amt_each, 0)
-    p.snapshot(i)
-
-hist1 = p.hist
-#for x in hist1: print(x)
-
+hist1 = buy_and_hold(prices, coins, start_amt, start_dt, end_dt)
 
 # strategy 2: distribute evenly across available coins
 
-p = Portfolio(start_amt, coins, 0)
-
-amt_each = p.value() / np.sum(prices.iloc[0] > 0)
-for c in coins:
-    if prices.iloc[0][c] > 0:
-        p.buy(c, amt_each, 0)
-p.snapshot(0)
-
-for i in range(1, len(prices.index)):
-    c_set = [c for c in coins if (prices.iloc[i-1][c] > 0)]
-    for c in c_set:
-        p.update_price(c, pct_chg.iloc[i][c])
-    
-    amt_each = p.value() / np.sum(prices.iloc[i] > 0)
-        
-    for c in c_set:
-        if p.held[c] > amt_each:
-            p.sell(c, p.held[c] - amt_each)
-
-    for c in c_set:
-        if p.held[c] < amt_each:
-            p.buy(c, amt_each - p.held[c])
-            
-    p.snapshot(i)
-
-# confirm via averages
-cash = [start_amt]
-for i in range(1, len(prices.index)):
-    a = pct_chg.iloc[i]
-    a = a[a != np.inf]
-    a = a[~pd.isnull(a)]
-    avg_chg = np.average(a)
-    new_amt = cash[-1] * (avg_chg+1)
-    cash.append(new_amt)
-
-hist2 = p.hist
-#for x in hist2: print(x['t'], x['value'], cash[x['t']])
-
+hist2 = hold_rebalance(prices, coins, start_amt, start_dt, end_dt)
 
 # strategy 3: invest in top 4 by % gain last 24hrs
 
-p = Portfolio(start_amt, coins, 0)
-num_choices = 4
+hist3 = trade_top_n(prices, coins, start_amt, 4, start_dt, end_dt, lag = 1)
 
-amt_each = p.value() / num_choices
-a = pct_chg.iloc[0]
-a = a[a != np.inf]
-a = a[~pd.isnull(a)]
-
-c_top = a.sort_values(ascending=False)[:num_choices].index
-for c in c_top:
-    p.buy(c, amt_each, 0)
-p.snapshot(0)
-
-for i in range(1, len(prices.index)):
-    a = pct_chg.iloc[i]
-    a = a[a != np.inf]
-    a = a[~pd.isnull(a)]
-    
-    c_top = a.sort_values(ascending=False)[:num_choices].index
-    for c in a.index:
-        p.update_price(c, pct_chg.iloc[i][c])
-    
-    amt_each = p.value() / num_choices
-    
-    for c in a.index:
-        if c not in c_top:
-            p.sell(c)
-        elif p.held[c] > amt_each:
-            p.sell(c, p.held[c] - amt_each)
-
-    for c in c_top:
-        if p.held[c] < amt_each:
-            p.buy(c, amt_each - p.held[c])
-            
-    p.snapshot(i)
-
-hist3 = p.hist
-#print(hist3)
-
-#for i in range(len(hist1)):
-#    print(i, hist1[i]['value'], hist2[i]['value'], hist3[i]['value'])
-
-
-hist1 = pd.DataFrame([h['value'] for h in hist1], index=prices.index, columns=['buy and hold'])
-hist2 = pd.DataFrame([h['value'] for h in hist2], index=prices.index, columns=['hold rebalance'])
-hist3 = pd.DataFrame([h['value'] for h in hist3], index=prices.index, columns=['trade top 4'])
+hist1 = pd.DataFrame([h['value'] for h in hist1], index=prices.loc[start_dt:end_dt].index, columns=['buy and hold'])
+hist2 = pd.DataFrame([h['value'] for h in hist2], index=prices.loc[start_dt:end_dt].index, columns=['hold rebalance'])
+hist3 = pd.DataFrame([h['value'] for h in hist3], index=prices.loc[start_dt:end_dt].index, columns=['trade top 4'])
 strategy_compare = pd.concat([hist1, hist2, hist3], axis=1)
 
 print(strategy_compare)
