@@ -3,6 +3,9 @@
 Created on Sat Jan 27 14:58:15 2018
 
 @author: cosmo
+
+Implements the Portfolio class which represents the current state of one's
+currency investment portolio
 """
 
 class Portfolio():
